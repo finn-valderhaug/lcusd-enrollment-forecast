@@ -146,41 +146,69 @@ with tabs[2]:
 
 # ---------------------------------------------------------------- Funding
 with tabs[3]:
-    st.markdown("Translate enrollment changes into dollars. **This is a simplified illustration**: enter "
-                "LCUSD's actual revenue per student from its adopted budget or the CDE "
-                "current-expense-of-education data.")
-    f1, f2c = st.columns(2)
-    model = f1.radio("Funding model", ["Enrollment-driven (LCFF-style)", "Fixed local revenue (basic-aid style)"])
-    ppr = f2c.number_input("Revenue per student, $ (illustrative placeholder)", 5000, 50000, 18000, 500)
-    base_rev = last_n * ppr
-    rows = []
-    for _, r in ft.iterrows():
-        for lab, n in [("p10", r.p10), ("median", r["median"]), ("p90", r.p90)]:
-            if model.startswith("Enrollment"):
-                rev = n * ppr
-                rows.append(dict(year=int(r.year), case=lab, revenue_m=rev / 1e6,
-                                 change_m=(rev - base_rev) / 1e6, per_student=ppr))
-            else:
-                rows.append(dict(year=int(r.year), case=lab, revenue_m=base_rev / 1e6, change_m=0.0,
-                                 per_student=base_rev / n))
-    fr = pd.DataFrame(rows)
-    if model.startswith("Enrollment"):
-        figf = px.line(fr, x="year", y="change_m", color="case",
-                       title=f"Revenue change vs {last_y} ($M), by enrollment case",
-                       labels={"change_m": "$ millions"})
-        st.plotly_chart(figf, use_container_width=True)
-        mid = fr[fr.case == "median"].iloc[-1]
-        st.metric(f"Median-case revenue change by {int(mid.year)}", f"${mid.change_m:+.1f}M")
-    else:
-        figf = px.line(fr, x="year", y="per_student", color="case",
-                       title="Revenue per student if local revenue stays fixed ($)",
-                       labels={"per_student": "$ per student"})
-        st.plotly_chart(figf, use_container_width=True)
-        mid = fr[fr.case == "median"].iloc[-1]
-        st.metric(f"Median-case revenue per student, {int(mid.year)}", f"${mid.per_student:,.0f}",
-                  f"{(mid.per_student / ppr - 1) * 100:+.1f}% vs {last_y}")
-    st.caption("Real funding rules (average daily attendance, multi-year averaging, supplemental grants) are "
-               "more complex than this model.")
+    st.markdown(
+        "Translate enrollment and attendance into dollars, **held at 2026-27 rates** (no inflation or state "
+        "funding changes). Only enrollment changes from year to year. Inputs are editable baselines, not audited figures.")
+    a1, a2, a3 = st.columns(3)
+    rate = a1.number_input("$ lost per student per absent day", 20, 300, 91, 1,
+                           help="From a 2026-27 principal's email (high school figure), assumed to apply district-wide.")
+    att_pct = a2.number_input("Attendance rate, %", 85.0, 99.9, 96.6, 0.1,
+                              help="Approx. district rate from public school-data sites; confirm with CDE/district.")
+    days = a3.number_input("Instructional days per year", 150, 200, 180, 1)
+    u_rate = st.slider("Uncertainty in $ per day (+/- %)", 0, 30, 10, 1)
+    u_att = st.slider("Uncertainty in attendance rate (+/- percentage points)", 0.0, 3.0, 1.0, 0.1)
+
+    att = att_pct / 100
+    lo_rate, hi_rate = rate * (1 - u_rate / 100), rate * (1 + u_rate / 100)
+    att_lo, att_hi = max(att - u_att / 100, 0.0), min(att + u_att / 100, 1.0)
+    per_student = rate * days * att          # attendance-based revenue per enrolled student
+
+    def absence_cost(n, r, a):
+        return n * days * (1 - a) * r
+
+    base_loss = absence_cost(last_n, rate, att)
+    f = ft.copy()
+    f["loss_mid"] = absence_cost(f["median"], rate, att) / 1e6
+    f["loss_low"] = absence_cost(f.p10, lo_rate, att_hi) / 1e6
+    f["loss_high"] = absence_cost(f.p90, hi_rate, att_lo) / 1e6
+    f["rev_mid"] = (f["median"] - last_n) * per_student / 1e6
+    f["rev_low"] = (f.p10 - last_n) * lo_rate * days * att_lo / 1e6
+    f["rev_high"] = (f.p90 - last_n) * hi_rate * days * att_hi / 1e6
+    fin = f.iloc[-1]
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Absent days per student / yr", f"{days * (1 - att):.1f}")
+    k2.metric(f"Absence cost {last_y}", f"${base_loss / 1e6:.2f}M")
+    k3.metric(f"Absence cost {int(fin.year)} (median)", f"${fin.loss_mid:.2f}M",
+              f"{fin.loss_mid - base_loss / 1e6:+.2f}M vs {last_y}")
+    money = lambda v: f"{'-' if v < 0 else '+'}${abs(v):.1f}M"
+    k4.metric(f"Attendance-based revenue change by {int(fin.year)}", money(fin.rev_mid),
+              f"range {money(fin.rev_low)} to {money(fin.rev_high)}", delta_color="off")
+
+    def band(df, mid, lo, hi, title, ylab):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.year, y=df[hi], line=dict(width=0), showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=df.year, y=df[lo], fill="tonexty", line=dict(width=0),
+                                 name="Uncertainty range", fillcolor="rgba(224,123,57,0.25)"))
+        fig.add_trace(go.Scatter(x=df.year, y=df[mid], name="Median enrollment, central rates",
+                                 line=dict(color="#e07b39", width=3), mode="lines+markers"))
+        fig.update_layout(title=title, yaxis_title=ylab, xaxis_title="School year (ending)")
+        return fig
+
+    st.plotly_chart(band(f, "loss_mid", "loss_low", "loss_high",
+                         "Annual cost of student absences ($M, at 2026-27 rates)", "$ millions"),
+                    use_container_width=True)
+    st.plotly_chart(band(f, "rev_mid", "rev_low", "rev_high",
+                         f"Attendance-based revenue change vs {last_y} ($M, from enrollment change only)",
+                         "$ millions"),
+                    use_container_width=True)
+    tbl = f[["year", "median", "loss_mid", "rev_mid"]].rename(columns={
+        "year": "Year", "median": "Enrollment (median)", "loss_mid": "Absence cost $M", "rev_mid": "Revenue change $M"})
+    st.dataframe(tbl.style.format({"Enrollment (median)": "{:,.0f}", "Absence cost $M": "{:.2f}",
+                                   "Revenue change $M": "{:+.2f}"}), hide_index=True)
+    st.caption(f"Implied funding per enrolled student: ${per_student:,.0f}/yr (= ${rate} x {days} days x {att_pct:.1f}%). "
+               "Assumes funding follows attendance and the $ per day applies district-wide (the source figure was for the "
+               "high school). Real funding rules are more complex; confirm with the district's budget.")
 
 # ---------------------------------------------------------------- Demographics
 with tabs[4]:
