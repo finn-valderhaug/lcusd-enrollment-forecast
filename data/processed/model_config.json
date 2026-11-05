@@ -1,0 +1,7 @@
+{
+  "csr_window": "all",
+  "k_method": "mean3",
+  "backtest_mape": 3.39,
+  "naive_mape": 2.49,
+  "selected_on": "rolling-origin backtest, horizons 1-3"
+}
