@@ -39,8 +39,9 @@ I used a **backtest**: pretend it's an earlier year, forecast the next few years
 
 | Forecast horizon | Cohort model error | "Nothing changes" error |
 |---|---|---|
-| 1 year ahead | 1.7% | — |
-| 3 years ahead | 5.4% | — |
+| 1 year ahead | 1.7% | 1.4% |
+| 2 years ahead | 3.7% | 2.8% |
+| 3 years ahead | 5.4% | 3.6% |
 | All forecasts | 3.4% | 2.5% |
 
 Things to know:

@@ -193,6 +193,7 @@ with tabs[3]:
         fig.add_trace(go.Scatter(x=df.year, y=df[mid], name="Median enrollment, central rates",
                                  line=dict(color="#e07b39", width=3), mode="lines+markers"))
         fig.update_layout(title=title, yaxis_title=ylab, xaxis_title="School year (ending)")
+        fig.update_xaxes(dtick=1, tickformat="d")
         return fig
 
     st.plotly_chart(band(f, "loss_mid", "loss_low", "loss_high",
